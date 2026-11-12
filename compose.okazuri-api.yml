@@ -1,0 +1,15 @@
+# /w/quest.nae/okazuri-api/compose.yml (webarena に配置済み。起動はしていない)
+# - フォルダ直下に okazuri-search-api(更新対象)、config.toml、search.db を置く
+# - config.toml の [server] host は 127.0.0.1 ではなく 0.0.0.0 にすること(コンテナ外から届かないため)
+# - ポートは 8118 (webarenaで未使用を確認済み。8000はmaps(nginx)が使用中)。ホストとコンテナで同じ番号にする(ufw route は DNAT後のコンテナ側ポートで判定されるため)
+# - config.toml: host = "0.0.0.0", port = 8118
+services:
+  okazuri-search-api:
+    image: alpine:3
+    working_dir: /app
+    command: ["./okazuri-search-api"]
+    volumes:
+      - /w/quest.nae/okazuri-api:/app
+    ports:
+      - "8118:8118"
+    restart: unless-stopped

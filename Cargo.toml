@@ -1,0 +1,20 @@
+[package]
+name = "gh-updater"
+version = "0.1.0"
+edition = "2021"
+description = "GitHub Releases の実行ファイルを監視し、配置・サービス再起動までを行う常駐アップデーター"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+sha2 = "0.10"
+ureq = "2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

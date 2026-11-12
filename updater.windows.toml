@@ -1,0 +1,31 @@
+# 自動アップデーター設定: Windows (x64)
+# 構造の説明は updater.mac.toml の冒頭を参照
+
+[updater]
+platform = "windows-x64"
+interval = "10m"
+
+[provider.github]
+token = ""     # 公開リポジトリのみなら空でよい (非公開リポジトリを取るなら repo の読み取り権限が必要)
+
+# ※ 現行リリースは旧形式(zip, Windows-msvc-x86_64)。下の asset 名は新形式の命名規則
+#   (<program>-<OS>-<arch>.exe) からの推定。実際のリリースで確認すること。
+[source.open-remote-url-sender]
+repo  = "NaeCqde/open-remote-url"
+asset = "open-remote-url-sender-Windows-x86_64.exe"
+
+[source.open-remote-url-receiver]
+repo  = "NaeCqde/open-remote-url"
+asset = "open-remote-url-receiver-Windows-x86_64.exe"
+
+[[target]]
+name    = "open-remote-url-sender"
+source  = "open-remote-url-sender"
+copy    = [{ to = 'C:\Users\USER\AppData\Local\Programs\open-remote-url\sender\open-remote-url-sender.exe' }]
+service = { kind = "windows-process", process = "open-remote-url-sender.exe", exe = 'C:\Users\USER\AppData\Local\Programs\open-remote-url\sender\open-remote-url-sender.exe', args = ["--daemon"] }
+
+[[target]]
+name    = "open-remote-url-receiver"
+source  = "open-remote-url-receiver"
+copy    = [{ to = 'C:\Users\USER\AppData\Local\Programs\open-remote-url\receiver\open-remote-url-receiver.exe' }]
+service = { kind = "windows-process", process = "open-remote-url-receiver.exe", exe = 'C:\Users\USER\AppData\Local\Programs\open-remote-url\receiver\open-remote-url-receiver.exe', args = ["--daemon"] }

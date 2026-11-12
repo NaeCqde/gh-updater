@@ -1,0 +1,16 @@
+# Linux (systemd): /etc/systemd/system/gh-updater.service
+# 導入: cp gh-updater /usr/local/bin/ ; 設定を /etc/gh-updater.toml に置く(トークンを含むので chmod 600)
+#       systemctl daemon-reload && systemctl enable --now gh-updater
+[Unit]
+Description=GitHub release auto updater
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/gh-updater --config /etc/gh-updater.toml
+Restart=always
+RestartSec=30
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target
