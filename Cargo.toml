@@ -1,6 +1,6 @@
 [package]
 name = "gh-updater"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "GitHub Releases の実行ファイルを監視し、配置・サービス再起動までを行う常駐アップデーター"
 
