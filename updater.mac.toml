@@ -103,3 +103,13 @@ name    = "open-remote-url-receiver"
 source  = "open-remote-url-receiver"
 copy    = [{ to = "/Users/USER/Applications/OpenRemoteURLReceiver.app", entry = "OpenRemoteURLReceiver.app" }]
 service = { kind = "launchd", label = "quest.nae.open-remote-url.receiver", plist = "/Users/USER/Library/LaunchAgents/quest.nae.open-remote-url.receiver.plist", process = "open-remote-url-receiver" }
+
+# --- gh-updater 自身の自己更新 ---------------------------------------------
+# 全ての対象の更新が終わった周回の最後に行う (途中の更新を中断しない)。
+# 新しい版は --version で動作確認してから置換し、同じ引数で起動し直す。
+[source.gh-updater]
+repo  = "NaeCqde/gh-updater"
+asset = "gh-updater-macOS-aarch64"
+
+[self_update]
+source = "gh-updater"

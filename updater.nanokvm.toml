@@ -19,3 +19,13 @@ name    = "vermouth-nanokvm"
 source  = "vermouth-nanokvm"
 copy    = [{ to = "/data/vermouth/vermouth-nanokvm", mode = "755" }]
 service = { kind = "reboot" }
+
+# --- gh-updater 自身の自己更新 ---------------------------------------------
+# 全ての対象の更新が終わった周回の最後に行う (途中の更新を中断しない)。
+# 新しい版は --version で動作確認してから置換し、同じ引数で起動し直す。
+[source.gh-updater]
+repo  = "NaeCqde/gh-updater"
+asset = "gh-updater-Linux-riscv64-musl"
+
+[self_update]
+source = "gh-updater"

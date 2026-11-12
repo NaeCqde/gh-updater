@@ -1,6 +1,7 @@
 mod config;
 mod github;
 mod install;
+mod self_update;
 mod select;
 mod service;
 mod state;
@@ -19,7 +20,8 @@ const PENDING_RETRY: Duration = Duration::from_secs(300);
 const USAGE: &str = "使い方: gh-updater --config <設定.toml> [--once | --check]
   (引数なし)  常駐して interval ごとに確認・更新
   --once      1回だけ確認・更新して終了
-  --check     更新が必要かを表示するだけ (何も変更しない)";
+  --check     更新が必要かを表示するだけ (何も変更しない)
+  --version   バージョンを表示";
 
 fn log(msg: impl AsRef<str>) {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -49,6 +51,10 @@ fn real_main() -> Result<()> {
             "--config" | "-c" => config_path = Some(args.next().context("--config にファイルを指定してください")?.into()),
             "--once" => mode = Mode::Once,
             "--check" => mode = Mode::Check,
+            "--version" | "-V" => {
+                println!("gh-updater {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return Ok(());
@@ -73,12 +79,16 @@ fn real_main() -> Result<()> {
     }
     let gh = Github::new(&cfg.provider.github.token);
 
+    if mode != Mode::Check {
+        recover_interrupted(&cfg, &state_path);
+    }
+
     let mut next_cycle = Instant::now();
     let mut attempts: HashMap<String, u32> = HashMap::new();
     loop {
         let mut state = State::load(&state_path)?;
         if Instant::now() >= next_cycle {
-            let failed = cycle(&cfg, &gh, &mut state, &work_dir, mode == Mode::Check);
+            let failed = cycle(&cfg, &gh, &mut state, &work_dir, mode == Mode::Check, mode == Mode::Daemon);
             if mode != Mode::Daemon {
                 if failed > 0 {
                     bail!("{failed} 件の対象で失敗しました");
@@ -127,7 +137,7 @@ fn retry_pending(cfg: &Config, state: &mut State, attempts: &mut HashMap<String,
 }
 
 /// 全ターゲットを1周する。失敗した件数を返す (1件の失敗で他を止めない)。
-fn cycle(cfg: &Config, gh: &Github, state: &mut State, work_dir: &Path, check_only: bool) -> usize {
+fn cycle(cfg: &Config, gh: &Github, state: &mut State, work_dir: &Path, check_only: bool, relaunch: bool) -> usize {
     let mut releases: HashMap<(String, Option<String>), std::result::Result<Release, String>> = HashMap::new();
     let mut failed = 0;
     for t in cfg.targets.iter().filter(|t| t.enabled) {
@@ -135,8 +145,39 @@ fn cycle(cfg: &Config, gh: &Github, state: &mut State, work_dir: &Path, check_on
             failed += 1;
             log(format!("[{}] 失敗: {e:#}", t.name));
         }
+        // 正常でも失敗でも、この対象の「作業中」の印は外す
+        if check_only {
+            continue;
+        }
+        if let Err(e) = state.clear_in_progress(&t.name) {
+            log(format!("[{}] 状態を保存できません: {e:#}", t.name));
+        }
+    }
+    // 自己更新は、全ての対象の処理が終わった最後に行う (途中の更新を中断しない)。
+    if let Some(su) = &cfg.self_update {
+        if let Err(e) = self_update::run(cfg, su, gh, state, work_dir, check_only, relaunch) {
+            failed += 1;
+            log(format!("[自己更新] 失敗: {e:#}"));
+        }
     }
     failed
+}
+
+/// 前回、更新の途中でプロセスが落ちた(systemctl restart・電源断など)ターゲットのサービスを起動し直す。
+/// 配置が済んでいなければ旧版のまま起動し、更新は次の周回でやり直す。
+fn recover_interrupted(cfg: &Config, state_path: &Path) {
+    let Ok(mut state) = State::load(state_path) else { return };
+    for name in state.in_progress.clone() {
+        let svc = cfg.targets.iter().find(|t| t.name == name).and_then(|t| t.service.as_ref());
+        match svc {
+            Some(s) => match service::start(s) {
+                Ok(()) => log(format!("[{name}] 前回の更新が途中で中断されていたため、サービスを起動し直しました")),
+                Err(e) => log(format!("[{name}] 中断された更新の後始末(サービス起動)に失敗: {e:#}")),
+            },
+            None => {}
+        }
+        let _ = state.clear_in_progress(&name);
+    }
 }
 
 fn update_target(
@@ -209,6 +250,7 @@ fn update_target(
     }
     if let Some(s) = &t.service {
         service::prepare(s);
+        state.mark_in_progress(&t.name)?;
         service::stop(s).context("サービスの停止に失敗")?;
     }
     let placed = if is_dmg {

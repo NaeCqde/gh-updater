@@ -15,6 +15,16 @@ pub struct Config {
     pub source: BTreeMap<String, Source>,
     #[serde(default, rename = "target")]
     pub targets: Vec<Target>,
+    /// gh-updater 自身の自己更新 (任意)。source に自分のリリースを指定する。
+    #[serde(default)]
+    pub self_update: Option<SelfUpdate>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelfUpdate {
+    /// [source.<名前>] の名前。asset はこのプラットフォーム用のファイル名にする。
+    pub source: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,6 +148,11 @@ impl Config {
             }
             if !s.repo.contains('/') {
                 bail!("source.{name}: repo は owner/repo 形式にしてください");
+            }
+        }
+        if let Some(su) = &self.self_update {
+            if !self.source.contains_key(&su.source) {
+                bail!("self_update: source \"{}\" が定義されていません", su.source);
             }
         }
         let mut seen = std::collections::HashSet::new();

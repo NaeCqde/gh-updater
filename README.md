@@ -7,6 +7,8 @@ GitHub Releases に上がった実行ファイル(や `.app.dmg`)を監視し、
 - 再起動方式: `exec` / `docker-compose` / `launchd` / `terminal-command` / `windows-process` / `reboot`
 - 変更検出はアセットの `digest`(sha256)を状態ファイルと比較(タグが固定でも検知可能)
 
+- 自己更新: `[self_update]` を書くと gh-updater 自身も更新(全対象の更新後に実行、`--version` で動作確認してから置換し再起動)。更新が途中で中断されても、次の起動時にサービスを起動し直す
+
 ## 使い方
 
 ```bash

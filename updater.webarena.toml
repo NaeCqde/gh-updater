@@ -24,3 +24,13 @@ name    = "okazuri-search-api"
 source  = "okazuri-search-api"
 copy    = [{ to = "/w/quest.nae/okazuri-api/okazuri-search-api", mode = "755" }]
 service = { kind = "docker-compose", file = "/w/quest.nae/okazuri-api/compose.yml", service = "okazuri-search-api" }
+
+# --- gh-updater 自身の自己更新 ---------------------------------------------
+# 全ての対象の更新が終わった周回の最後に行う (途中の更新を中断しない)。
+# 新しい版は --version で動作確認してから置換し、同じ引数で起動し直す。
+[source.gh-updater]
+repo  = "NaeCqde/gh-updater"
+asset = "gh-updater-Linux-x86_64-musl"
+
+[self_update]
+source = "gh-updater"

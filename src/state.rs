@@ -8,6 +8,10 @@ use std::path::{Path, PathBuf};
 pub struct State {
     #[serde(default)]
     pub targets: BTreeMap<String, Applied>,
+    /// 「停止 → 配置 → 起動」の途中にあるターゲット名。プロセスが途中で落ちても、
+    /// 次の起動時にサービスを必ず起動し直すための印。
+    #[serde(default)]
+    pub in_progress: Vec<String>,
     #[serde(skip)]
     path: PathBuf,
 }
@@ -25,6 +29,22 @@ pub struct Applied {
 impl State {
     pub fn has_pending(&self) -> bool {
         self.targets.values().any(|a| a.start_pending)
+    }
+
+    pub fn mark_in_progress(&mut self, name: &str) -> Result<()> {
+        if !self.in_progress.iter().any(|n| n == name) {
+            self.in_progress.push(name.to_string());
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    pub fn clear_in_progress(&mut self, name: &str) -> Result<()> {
+        if self.in_progress.iter().any(|n| n == name) {
+            self.in_progress.retain(|n| n != name);
+            self.save()?;
+        }
+        Ok(())
     }
 
     pub fn load(path: &Path) -> Result<State> {
