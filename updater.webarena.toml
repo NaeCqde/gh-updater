@@ -6,6 +6,7 @@
 [updater]
 platform = "linux-x64-musl"
 interval = "10m"
+state_file = "/var/lib/gh-updater/state.json"   # systemd では USER/HOME が無く既定の場所が不定になるため明示
 
 [provider.github]
 token = ""
