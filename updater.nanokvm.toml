@@ -1,0 +1,21 @@
+# 自動アップデーター設定: NanoKVM (Linux riscv64 musl)
+# 構造の説明は updater.mac.toml の冒頭を参照
+
+[updater]
+platform = "linux-riscv64-musl"
+interval = "30m"
+
+[provider.github]
+token = ""
+
+# このリポジトリのriscv64資産は musl 表記なし
+[source.vermouth-nanokvm]
+repo  = "NaeCqde/vermouth"
+asset = "vermouth-nanokvm-Linux-riscv64"
+
+# service.kind = "reboot": 更新後に OS ごと再起動 (停止処理なし。copy 完了後に reboot)
+[[target]]
+name    = "vermouth-nanokvm"
+source  = "vermouth-nanokvm"
+copy    = [{ to = "/data/vermouth/vermouth-nanokvm", mode = "755" }]
+service = { kind = "reboot" }

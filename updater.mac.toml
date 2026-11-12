@@ -1,0 +1,105 @@
+# ============================================================
+# 自動アップデーター設定: Mac (Apple Silicon)
+#
+# 構造:
+#   [updater]            全体設定
+#   [provider.github]    ダウンロード元の共通設定(トークンはここ)
+#   [source.名前]        何を取るか(リポジトリ + アセット名)
+#   [[target]]           どこに置くか(copy)と、どう止めて起動するか(service)
+#
+# 更新の流れ: 取得+SHA-256検証 → service停止 → copy(全コピー先) → service起動
+# copy は複数書ける(1つのファイルを複数フォルダへ)
+# このファイルにトークンを書くので権限は 600 にすること
+# ============================================================
+
+[updater]
+platform = "macos-arm64"      # 想定OS。実機と違えば起動時に中止
+interval = "10m"
+request_permissions_on_start = true   # 初回起動時にTerminal操作(オートメーション)の許可を要求。初回は手動で起動して許可すること
+
+[provider.github]
+token = ""                    # 公開リポジトリのみなら空でよい(レート制限対策には設定推奨)
+
+# ---------- ソース ----------
+[source.vermouth-server]
+repo  = "NaeCqde/vermouth"
+asset = "vermouth-server-macOS-aarch64"
+
+[source.vesync-airpurifier]
+repo  = "NaeCqde/vesync_airpurifier"
+asset = "vesync-airpurifier-macOS-aarch64"
+
+[source.switchbot-aircon]
+repo  = "NaeCqde/switchbot-aircon"
+asset = "switchbot-aircon-macOS-aarch64"
+
+[source.room-temp-automator]
+repo  = "NaeCqde/room-temp-automator"
+asset = "room-temp-automator-macOS-aarch64"
+
+[source.best-lights-selector]
+repo  = "NaeCqde/best-lights-selector"
+asset = "best-lights-selector-macOS-aarch64"
+
+# open-remote-url / monsgeek-profile-switcher 方式: .app を入れた dmg を配布(<asset>.sha256 付き)
+# ※ open-remote-url の dmg は現行リリースにも同名で存在。新形式(タグ latest)への移行は未確認
+[source.open-remote-url-sender]
+repo  = "NaeCqde/open-remote-url"
+asset = "OpenRemoteURLSender.app.dmg"
+
+[source.open-remote-url-receiver]
+repo  = "NaeCqde/open-remote-url"
+asset = "OpenRemoteURLReceiver.app.dmg"
+
+# ---------- ターゲット: .command で起動しているプログラム ----------
+# service.kind = "terminal-command":
+#   停止 = プロセスのttyを持つTerminalウィンドウを閉じ、プロセスをkill
+#   起動 = .command を open (新しいTerminalウィンドウで起動)
+[[target]]
+name    = "vermouth-server"
+source  = "vermouth-server"
+copy    = [{ to = "/Users/USER/Documents/vermouth/vermouth-server", mode = "755" }]
+service = { kind = "terminal-command", process = "vermouth-server", file = "/Users/USER/Documents/vermouth/vermouth.command" }
+
+[[target]]
+name    = "vesync-airpurifier"
+source  = "vesync-airpurifier"
+copy    = [{ to = "/Users/USER/Documents/smarthome/parents/vesync-airpurifier/vesync-airpurifier", mode = "755" }]
+service = { kind = "terminal-command", process = "vesync-airpurifier", file = "/Users/USER/Documents/smarthome/parents/vesync-airpurifier/vesync-airpurifier.command" }
+
+[[target]]
+name    = "switchbot-aircon"
+source  = "switchbot-aircon"
+copy    = [{ to = "/Users/USER/Documents/smarthome/parents/switchbot-aircon/switchbot-aircon", mode = "755" }]
+service = { kind = "terminal-command", process = "switchbot-aircon", file = "/Users/USER/Documents/smarthome/parents/switchbot-aircon/switchbot-aircon.command" }
+
+[[target]]
+name    = "room-temp-automator"
+source  = "room-temp-automator"
+copy    = [{ to = "/Users/USER/Documents/smarthome/parents/room-temp-automator/room-temp-automator", mode = "755" }]
+service = { kind = "terminal-command", process = "room-temp-automator", file = "/Users/USER/Documents/smarthome/parents/room-temp-automator/room-temp-automator.command" }
+
+[[target]]
+name    = "best-lights-selector"
+source  = "best-lights-selector"
+copy    = [{ to = "/Users/USER/Documents/smarthome/parents/best-lights-selector/best-lights-selector", mode = "755" }]
+service = { kind = "terminal-command", process = "best-lights-selector", file = "/Users/USER/Documents/smarthome/parents/best-lights-selector/best-lights-selector.command" }
+
+# ---------- ターゲット: launchd 管理の .app ----------
+# 実機検証: macOSには実行中ファイルの書き込みロックは無いが、実行中の署名付きバイナリを
+# その場で上書きするとプロセスが即死した。そのため必ず「停止 → .app丸ごと入れ替え → 起動」。
+# service.kind = "launchd" (open-remote-url の stop_daemon/start_daemon と同じ手順):
+#   停止 = launchctl unload <plist> + pkill -9 -x <process>
+#   起動 = launchctl load <plist> + launchctl start <label>
+# copy.entry = dmg 内の .app 名。コピー先の既存 .app は削除して丸ごと置き換える
+[[target]]
+name    = "open-remote-url-sender"
+source  = "open-remote-url-sender"
+copy    = [{ to = "/Users/USER/Applications/OpenRemoteURLSender.app", entry = "OpenRemoteURLSender.app" }]
+service = { kind = "launchd", label = "quest.nae.open-remote-url.sender", plist = "/Users/USER/Library/LaunchAgents/quest.nae.open-remote-url.sender.plist", process = "open-remote-url-sender" }
+
+[[target]]
+name    = "open-remote-url-receiver"
+source  = "open-remote-url-receiver"
+copy    = [{ to = "/Users/USER/Applications/OpenRemoteURLReceiver.app", entry = "OpenRemoteURLReceiver.app" }]
+service = { kind = "launchd", label = "quest.nae.open-remote-url.receiver", plist = "/Users/USER/Library/LaunchAgents/quest.nae.open-remote-url.receiver.plist", process = "open-remote-url-receiver" }

@@ -1,0 +1,78 @@
+# ============================================================
+# 【設計案・未実装】Minecraft サーバー一式の更新 (vultr: velocity/geyser, webarena: portal)
+# 目的: サーバー本体と全プラグインを先に解決・ダウンロードし、再起動を1回で済ませる
+# ============================================================
+
+[updater]
+platform = "linux-x64-musl"
+interval = "6h"
+
+[provider.github]
+token = ""
+
+[provider.modrinth]
+# 必要ならAPIトークン
+
+# --- 汎用バージョンセレクター: 全ソース共通の [*.select] で使える ---
+#   channel : "stable" | "beta" | "alpha" | "any"   許容するリリース種別(下限)
+#   version : "latest"        その channel で最新
+#             "1.21.x"        x は「その階層で数値が最大」。1.21.11 > 1.21.4 のように数値比較
+#             "1.21.4"        完全一致
+#   compatible_with : 別 artifact の名前。そのartifactで「実際に解決された版」に
+#                     対応を宣言している版だけを候補にする(プラグインの対応版選択)
+#   on_incompatible : 対応版が無いプラグインがあった時の動作
+#                     "hold" = 全体の更新を保留(再起動もしない) / "skip" = そのプラグインは現状維持 / "fail"
+
+# ---------- ソース定義 ----------
+[source.purpur]
+provider = "purpur"                       # 本体の配布元
+project  = "purpur"
+[source.purpur.select]
+channel = "stable"
+version = "1.21.x"                        # 1.21系で最大のパッチ版
+
+[source.viaversion]
+provider = "modrinth"                     # プラグインの配布元
+project  = "viaversion"
+file     = "*.jar"
+[source.viaversion.select]
+channel         = "stable"
+version         = "latest"
+compatible_with = "server"                # 下の artifact "server" の解決版に合わせる
+on_incompatible = "hold"
+
+[source.luckperms]
+provider = "github"
+repo     = "LuckPerms/LuckPerms"
+asset    = "LuckPerms-Bukkit-*.jar"
+[source.luckperms.select]
+channel         = "stable"
+version         = "latest"
+compatible_with = "server"
+on_incompatible = "skip"
+
+# ---------- ターゲット: 1回の更新で本体+プラグインをまとめて処理 ----------
+# 流れ: ①全artifactの版を解決 → ②全部ダウンロード+検証 → ③stop → ④全コピー → ⑤start (再起動は1回)
+# service.kind は updater.mac.toml 等と共通: exec / docker-compose / launchd / terminal-command / windows-process / reboot
+[[target]]
+name    = "portal"
+service = { kind = "exec", stop = ["systemctl", "stop", "portal"], start = ["systemctl", "start", "portal"] }
+
+  [[target.artifact]]
+  name   = "server"                         # compatible_with から参照される名前
+  source = "purpur"
+  copy   = [{ to = "/w/quest.nae/mc/portal/purpur.jar" }]
+
+  [[target.artifact]]
+  name   = "viaversion"
+  source = "viaversion"
+  copy   = [{ to = "/w/quest.nae/mc/portal/plugins/ViaVersion.jar" }]
+
+  [[target.artifact]]
+  name   = "luckperms"
+  source = "luckperms"
+  # 同じファイルを複数フォルダへコピー
+  copy   = [
+    { to = "/w/quest.nae/mc/portal/plugins/LuckPerms.jar" },
+    { to = "/w/quest.nae/mc/ton/plugins/LuckPerms.jar" },
+  ]

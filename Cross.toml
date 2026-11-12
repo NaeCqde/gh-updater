@@ -1,0 +1,20 @@
+# cross 用。Apple Silicon の Mac では cross 標準イメージ(amd64のみ)が使えないため、
+# arm64 でも動く rust-musl-cross のイメージを musl の3ターゲットに指定する。
+# リンカはイメージ内の ~/.cargo/config.toml が cross の CARGO_HOME 上書きで効かないため、
+# ビルド時に環境変数で渡す(build-cross.sh 参照)。
+[build.env]
+passthrough = [
+  "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER",
+  "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER",
+  "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER",
+  "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_RUSTFLAGS",
+]
+
+[target.x86_64-unknown-linux-musl]
+image = "ghcr.io/rust-cross/rust-musl-cross:x86_64-musl"
+
+[target.aarch64-unknown-linux-musl]
+image = "ghcr.io/rust-cross/rust-musl-cross:aarch64-musl"
+
+[target.riscv64gc-unknown-linux-musl]
+image = "ghcr.io/rust-cross/rust-musl-cross:riscv64gc-musl"

@@ -1,0 +1,26 @@
+# 自動アップデーター設定: webarena (Linux x64 musl)
+# 構造の説明は updater.mac.toml の冒頭を参照
+# RAMに余裕が少ない(利用可能 約390MB)。バイナリは約200MBあるため、ダウンロードは
+# ディスクへストリーミングし、メモリに全体を載せない実装にすること。
+
+[updater]
+platform = "linux-x64-musl"
+interval = "10m"
+
+[provider.github]
+token = ""
+
+[source.okazuri-search-api]
+repo  = "NaeCqde/okazuri-search-api"
+asset = "okazuri-search-api-Linux-x86_64-musl"
+
+# バイナリは compose.yml が /w/quest.nae/okazuri-api を /app にマウントして実行する。
+# search.db と config.toml は同フォルダ直下(アプリは起動ディレクトリの config.toml / search.db を読む)。
+# service.kind = "docker-compose":
+#   停止 = docker compose -f <file> stop <service>
+#   起動 = docker compose -f <file> up -d <service>
+[[target]]
+name    = "okazuri-search-api"
+source  = "okazuri-search-api"
+copy    = [{ to = "/w/quest.nae/okazuri-api/okazuri-search-api", mode = "755" }]
+service = { kind = "docker-compose", file = "/w/quest.nae/okazuri-api/compose.yml", service = "okazuri-search-api" }
