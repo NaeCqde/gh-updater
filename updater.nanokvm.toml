@@ -4,6 +4,8 @@
 [updater]
 platform = "linux-riscv64-musl"
 interval = "30m"
+# /data は PC に見せている仮想USBディスクで NanoKVM 側からは読み取り専用のため、本体側 /opt を使う
+state_file = "/opt/gh-updater/state.json"
 
 [provider.github]
 token = ""
@@ -17,7 +19,7 @@ asset = "vermouth-nanokvm-Linux-riscv64"
 [[target]]
 name    = "vermouth-nanokvm"
 source  = "vermouth-nanokvm"
-copy    = [{ to = "/data/vermouth/vermouth-nanokvm", mode = "755" }]
+copy    = [{ to = "/opt/vermouth/vermouth-nanokvm", mode = "755" }]
 service = { kind = "reboot" }
 
 # --- gh-updater 自身の自己更新 ---------------------------------------------
