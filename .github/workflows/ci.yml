@@ -1,0 +1,326 @@
+name: ci
+
+# Every push and pull request builds the program for every platform and
+# archives them. The `latest` release is updated only by a push to the main branch (its tag moves to the pushed commit); other branches only build; a version
+# tag (`git tag v0.1.0 && git push --tags`), or a run started by hand with a tag name, makes the release of that tag. A pull
+# request does not publish anything. Changes to documentation, the license and editor settings alone do not start it.
+on:
+    push:
+        branches: ["**"]
+        tags:
+            - "v*"
+        paths-ignore:
+            - "**.md"
+            - "LICENSE*"
+            - "docs/**"
+            - ".gitignore"
+            - ".gitattributes"
+            - ".prettierrc*"
+            - ".editorconfig"
+            - ".vscode/**"
+            - ".github/dependabot.yml"
+            - ".github/workflows/security.yml"
+            - "**/.DS_Store"
+    pull_request:
+        paths-ignore:
+            - "**.md"
+            - "LICENSE*"
+            - "docs/**"
+            - ".gitignore"
+            - ".gitattributes"
+            - ".prettierrc*"
+            - ".editorconfig"
+            - ".vscode/**"
+            - ".github/dependabot.yml"
+            - ".github/workflows/security.yml"
+            - "**/.DS_Store"
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: "Tag of the release to create (made from the selected branch if it does not exist)"
+                required: true
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
+env:
+    RUST_BACKTRACE: 1
+
+jobs:
+    # A push to main is, as a rule, the merge of a pull request that has already been built. When the tree of the merged commit is
+    # the very tree that the pull request run built (every platform recorded it in TREE-<platform>), that run's files are used and
+    # nothing is built again; any other case (main moved on, a direct push, a build missing or expired) builds as usual.
+    reuse:
+        name: Reuse the pull request build
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: read
+            actions: read
+            pull-requests: read
+        outputs:
+            reuse: ${{ steps.find.outputs.reuse }}
+        steps:
+            - uses: actions/checkout@v4
+              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              with:
+                  persist-credentials: false
+            - name: Find the build of the pull request
+              id: find
+              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  head=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].head.sha // empty')
+                  [ -n "$head" ] || { echo "no pull request: build"; exit 0; }
+                  run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event pull_request --commit "$head" --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+                  [ -n "$run" ] || { echo "no successful run of the pull request: build"; exit 0; }
+                  # only a run of a branch of this repository: the files of a fork's run are built by code that nobody here has trusted
+                  [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq '.head_repository.full_name')" = "$GITHUB_REPOSITORY" ] || { echo "the pull request run is from a fork: build"; exit 0; }
+                  mkdir dl reuse
+                  gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'gh-updater-*' --dir dl || { echo "download failed: build"; exit 0; }
+                  mine=$(git rev-parse 'HEAD^{tree}')
+                  n=0
+                  for f in dl/*/TREE-*; do
+                    [ -f "$f" ] && [ "$(cat "$f")" = "$mine" ] || { echo "the tree differs from the pull request build: build"; exit 0; }
+                    n=$((n + 1))
+                  done
+                  # one per platform of the matrix below
+                  [ "$n" -eq 5 ] || { echo "$n platforms only: build"; exit 0; }
+                  mv dl/*/* reuse/
+                  echo "reuse run $run (tree $mine)"
+                  echo "reuse=true" >> "$GITHUB_OUTPUT"
+            - uses: actions/upload-artifact@v4
+              if: steps.find.outputs.reuse == 'true'
+              with:
+                  name: gh-updater-reused
+                  path: reuse/*
+                  if-no-files-found: error
+
+    package:
+        name: Build - ${{ matrix.platform.os-name }}
+        needs: reuse
+        if: ${{ !cancelled() && needs.reuse.outputs.reuse != 'true' }}
+        strategy:
+            fail-fast: false
+            matrix:
+                # https://github.com/actions/runner-images
+                # RISC-V is cross-built on a normal x86_64 runner (the native RISC-V runner is slow and flaky)
+                platform:
+                    - {os-name: Linux-x86_64-musl, runs-on: ubuntu-24.04, target: x86_64-unknown-linux-musl, ext: "", zip: false, crates: "."}
+                    - {os-name: Linux-aarch64-musl, runs-on: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, ext: "", zip: false, crates: "."}
+                    - {os-name: Linux-riscv64-musl, runs-on: ubuntu-24.04, target: riscv64gc-unknown-linux-musl, ext: "", zip: false, crates: ".", cross: true}
+                    - {os-name: Windows-x86_64, runs-on: windows-2025, target: x86_64-pc-windows-msvc, ext: ".exe", zip: true, crates: "."}
+                    - {os-name: macOS-aarch64, runs-on: macos-latest, target: aarch64-apple-darwin, ext: "", zip: false, crates: "."}
+        runs-on: ${{ matrix.platform.runs-on }}
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions-rs/toolchain@v1
+              with:
+                  toolchain: stable
+                  target: ${{ matrix.platform.target }}
+                  override: true
+                  profile: minimal
+            - uses: Swatinem/rust-cache@v2
+              with:
+                  workspaces: |-
+                      .
+                  key: ${{ matrix.platform.target }}
+            # musl-gcc compiles the C parts for the musl targets (these are built natively, not with cross: its container is
+            # too old to run the build scripts of newer crates)
+            - name: Install musl tools
+              if: contains(matrix.platform.target, 'linux-musl') && !matrix.platform.cross
+              run: sudo apt-get update && sudo apt-get install -y musl-tools
+            - name: Build
+              shell: bash
+              env:
+                  CC_x86_64_unknown_linux_musl: musl-gcc
+                  CC_aarch64_unknown_linux_musl: musl-gcc
+                  CC_riscv64gc_unknown_linux_musl: musl-gcc
+              run: |
+                  if [[ "${{ matrix.platform.cross }}" == "true" ]]; then
+                    # The cross toolchain of rust-musl-cross (a static musl binary for RISC-V, built on this x86_64 runner). The image's
+                    # own cargo config is not used because CARGO_HOME is moved, so the linker is given by the environment.
+                    mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git"
+                    docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work \
+                      -v "$HOME/.cargo/registry":/cargo/registry -v "$HOME/.cargo/git":/cargo/git \
+                      -e HOME=/tmp/home -e CARGO_HOME=/cargo \
+                      -e CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_MUSL_LINKER=riscv64-unknown-linux-musl-gcc \
+                      -e CC_riscv64gc_unknown_linux_musl=riscv64-unknown-linux-musl-gcc \
+                      -e RUSTFLAGS="-Ctarget-feature=+crt-static" \
+                      ghcr.io/rust-cross/rust-musl-cross:riscv64gc-musl \
+                      sh -c 'for crate in ${{ matrix.platform.crates }}; do cargo build --manifest-path "$crate/Cargo.toml" --locked --release --target ${{ matrix.platform.target }} || exit 1; done'
+                    exit 0
+                  fi
+                  if [[ "${{ matrix.platform.target }}" == *linux-musl ]]; then export RUSTFLAGS="-Ctarget-feature=+crt-static"; fi
+                  for crate in ${{ matrix.platform.crates }}; do
+                    cargo build --manifest-path "$crate/Cargo.toml" --locked --release --target ${{ matrix.platform.target }}
+                  done
+
+            # One file per program and platform, uploaded as it is (no archive): <program>-<platform>[.exe], and its SHA-256 next to it.
+            # The license, the changes and the config templates are added once, by the release job.
+            - name: Package
+              shell: bash
+              run: |
+                  mkdir out
+                  pack() { # crate executable
+                    local crate="$1" exe="$2"
+                    local asset="$exe-${{ matrix.platform.os-name }}${{ matrix.platform.ext }}"
+                    cp "$crate/target/${{ matrix.platform.target }}/release/$exe${{ matrix.platform.ext }}" "out/$asset"
+                    (cd out && { sha256sum "$asset" 2>/dev/null || shasum -a 256 "$asset"; } > "$asset.sha256")
+                  }
+                  git rev-parse 'HEAD^{tree}' > "out/TREE-${{ matrix.platform.os-name }}"
+                  pack . gh-updater
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: gh-updater-${{ matrix.platform.os-name }}
+                  path: out/*
+                  if-no-files-found: error
+
+    # After the platforms have built. A platform that fails does not hold back a release that the others could make, but a
+    # platform that failed is missing from it.
+    # The macOS files are signed after the build (or after the pull request build was reused), and only for merged code: a push to main or
+    # a version tag (pushes need write access). A pull request and other branches never enter the environment `signing`, which holds the
+    # certificate (the owner's self-signed one: macOS keeps its permissions for the app across updates when the identity is fixed).
+    sign:
+        name: Sign the macOS files
+        needs: [reuse, package]
+        if: ${{ !cancelled() && (needs.reuse.outputs.reuse == 'true' || needs.package.result == 'success') && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+        runs-on: macos-latest
+        environment: signing
+        permissions:
+            contents: read
+        steps:
+            - uses: actions/download-artifact@v4
+              with:
+                  path: in
+                  pattern: gh-updater-*
+                  merge-multiple: true
+            - name: Sign
+              env:
+                  SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+                  SIGN_P12_PASSWORD: ${{ secrets.MACOS_SIGN_P12_PASSWORD }}
+              run: |
+                  set -euo pipefail
+                  keychain="$RUNNER_TEMP/sign.keychain-db"
+                  pw=$(uuidgen)
+                  orig=$(security list-keychains -d user | tr -d '"' | tr -s ' \n' ' ')
+                  trap 'security list-keychains -d user -s $orig; security delete-keychain "$keychain" 2>/dev/null || true; rm -f "$RUNNER_TEMP/sign.p12"' EXIT
+                  echo "$SIGN_P12" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+                  security create-keychain -p "$pw" "$keychain"
+                  security set-keychain-settings -lut 3600 "$keychain"
+                  security unlock-keychain -p "$pw" "$keychain"
+                  security import "$RUNNER_TEMP/sign.p12" -k "$keychain" -P "$SIGN_P12_PASSWORD" -T /usr/bin/codesign
+                  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pw" "$keychain" > /dev/null
+                  # codesign finds the identity only in a keychain of the search list
+                  security list-keychains -d user -s "$keychain" $orig
+                  id=$(security find-identity -p codesigning "$keychain" | awk '/\)/ {print $2; exit}')
+                  [ -n "$id" ] || { echo "no signing identity"; exit 1; }
+                  mkdir signed
+                  n=0
+                  for f in in/*macOS*; do
+                    case "$f" in *.sha256) continue ;; esac
+                    [ -f "$f" ] || continue
+                    b=$(basename "$f")
+                    cp "$f" "signed/$b"
+                    # the identifier is fixed per program, so the permissions stay with the program across builds
+                    codesign --force --keychain "$keychain" --sign "$id" --identifier "quest.nae.gh-updater" "signed/$b"
+                    codesign -v "signed/$b"
+                    (cd signed && shasum -a 256 "$b" > "$b.sha256")
+                    n=$((n + 1))
+                  done
+                  # an app in a disk image: the app inside is signed, with the bundle identifier
+                  for f in in/*.app.dmg; do
+                    [ -f "$f" ] || continue
+                    b=$(basename "$f")
+                    hdiutil convert "$f" -format UDRW -o "$RUNNER_TEMP/rw.dmg" -quiet
+                    mnt=$(hdiutil attach "$RUNNER_TEMP/rw.dmg" -nobrowse -readwrite | awk -F'\t' 'END {print $NF}')
+                    for app in "$mnt"/*.app; do
+                      bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")
+                      codesign --force --deep --keychain "$keychain" --sign "$id" --identifier "$bundle_id" "$app"
+                      codesign -v "$app"
+                    done
+                    hdiutil detach "$mnt" -quiet
+                    hdiutil convert "$RUNNER_TEMP/rw.dmg" -format UDZO -o "signed/$b" -quiet
+                    rm -f "$RUNNER_TEMP/rw.dmg"
+                    (cd signed && shasum -a 256 "$b" > "$b.sha256")
+                    n=$((n + 1))
+                  done
+                  [ "$n" -gt 0 ] || { echo "no macOS file to sign"; exit 1; }
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: signed-macos
+                  path: signed/*
+                  if-no-files-found: error
+                  retention-days: 1
+
+    release:
+        name: Release
+        needs: [reuse, package, sign]
+        if: ${{ !cancelled() && needs.sign.result != 'failure' }}
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  persist-credentials: false
+            - uses: actions/download-artifact@v4
+              with:
+                  path: dist
+                  pattern: gh-updater-*
+                  merge-multiple: true
+            - uses: actions/download-artifact@v4
+              if: needs.sign.result == 'success'
+              with:
+                  name: signed-macos
+                  path: signed
+            - name: Use the signed macOS files
+              if: needs.sign.result == 'success'
+              run: cp signed/* dist/
+            - name: List the files
+              run: ls -l dist
+            # Nothing is released until the commit is in the default branch (main): a version tag or a run started by hand on any other
+            # commit stops here.
+            - name: The commit must be in main
+              if: ${{ github.event_name != 'push' || startsWith(github.ref, 'refs/tags/v') }}
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  status=$(gh api "repos/${{ github.repository }}/compare/main...${{ github.sha }}" --jq .status)
+                  case "$status" in identical|behind) ;; *) echo "::error::commit ${{ github.sha }} is not in main ($status): not released"; exit 1 ;; esac
+            - name: Move the latest tag
+              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  gh api -X PATCH "repos/${{ github.repository }}/git/refs/tags/latest" -f sha="${{ github.sha }}" -F force=true \
+                    || gh api -X POST "repos/${{ github.repository }}/git/refs" -f ref="refs/tags/latest" -f sha="${{ github.sha }}"
+            # The rolling release is made again by every push (the tag was moved just above): its date is the date of the push, and only the
+            # files of this run are in it.
+            - name: Remove the old rolling release
+              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: gh release delete latest --repo "${{ github.repository }}" --yes || true
+            # Next to the executables, once: the license and the files this repository has of Changes.md and config templates (a file name that starts with a dot cannot be a
+            # release asset, so .env is example.env).
+            - name: Add the files that are the same on every platform
+              run: |
+                  rm -f dist/TREE-*
+                  cp "README.md" "dist/README.md"
+            - name: Make the release
+              if: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.tag != '') }}
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || 'latest' }}
+                  target_commitish: ${{ github.sha }}
+                  prerelease: false
+                  # the rolling `latest` is shown as the latest release; a version tag keeps GitHub's own rule (by date)
+                  make_latest: ${{ (inputs.tag || startsWith(github.ref, 'refs/tags/v')) && 'legacy' || 'true' }}
+                  files: dist/*
+                  generate_release_notes: ${{ inputs.tag != '' || startsWith(github.ref, 'refs/tags/v') }}
+                  fail_on_unmatched_files: true
