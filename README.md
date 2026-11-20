@@ -1,5 +1,7 @@
 # gh-updater
 
+[English](README.en.md) | 日本語
+
 GitHub Releases に上がった実行ファイル(や `.app.dmg`)を監視し、SHA-256 を検証して指定フォルダへ配置し、サービスの停止・起動までを 1 プロセスで行う常駐アップデーターです。設定は TOML。
 
 - 対応: Windows x64 / macOS arm64 / Linux x64・arm64・riscv64 (musl)
