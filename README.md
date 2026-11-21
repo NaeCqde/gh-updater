@@ -19,7 +19,7 @@ gh-updater --config updater.toml --once   # 1 回だけ確認・更新
 gh-updater --config updater.toml --check  # 確認のみ(更新しない)
 ```
 
-設定例は `updater.*.toml`(冒頭のコメントに構造の説明あり)。常駐化のひな形は `service/`(systemd / launchd / タスクスケジューラ / NanoKVM)。
+設定例は `updater.*.toml`(冒頭のコメントに構造の説明あり)。常駐化は `gh-updater --config <設定> --install` で登録、`gh-updater --uninstall` で解除(`--dry-run` で内容だけ確認)。手で登録する場合のひな形は `service/`(systemd / launchd / タスクスケジューラ / NanoKVM)。
 
 ## ビルド
 
