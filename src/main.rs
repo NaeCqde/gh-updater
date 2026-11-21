@@ -1,6 +1,7 @@
 mod config;
 mod github;
 mod install;
+mod lock;
 mod self_update;
 mod select;
 mod service;
@@ -16,6 +17,8 @@ use std::time::{Duration, Instant};
 
 /// 起動が保留中のターゲットを、この間隔で再試行する (許可ダイアログを出し続けないよう長めに)。
 const PENDING_RETRY: Duration = Duration::from_secs(300);
+/// 別のプロセスが更新中でロックが取れないときに、取り直すまで待つ時間 (常駐側)
+const LOCK_RETRY: Duration = Duration::from_secs(10);
 
 const USAGE: &str = "使い方: gh-updater --config <設定.toml> [--once | --check]
   (引数なし)  常駐して interval ごとに確認・更新
@@ -79,13 +82,44 @@ fn real_main() -> Result<()> {
     }
     let gh = Github::new(&cfg.provider.github.token);
 
+    // 別の gh-updater が更新の最中ならやめる (--once)。常駐側は終わるまで待つ。ロックだけ残ってプロセスがいなければ取れる。
+    let lock_path = state_path.with_extension("lock");
+    let mut _once_lock = None;
     if mode != Mode::Check {
+        let lock = loop {
+            match lock::try_acquire(&lock_path)? {
+                Ok(l) => break l,
+                Err(pid) if mode == Mode::Once => {
+                    println!("別の gh-updater{} が実行中のため、実行しません", pid.map(|p| format!(" (PID {p})")).unwrap_or_default());
+                    return Ok(());
+                }
+                Err(pid) => {
+                    log(format!("別の gh-updater{} が実行中です。待ちます", pid.map(|p| format!(" (PID {p})")).unwrap_or_default()));
+                    std::thread::sleep(LOCK_RETRY);
+                }
+            }
+        };
         recover_interrupted(&cfg, &state_path);
+        if mode == Mode::Once {
+            _once_lock = Some(lock);
+        }
     }
 
     let mut next_cycle = Instant::now();
     let mut attempts: HashMap<String, u32> = HashMap::new();
     loop {
+        // 常駐: 更新の最中だけロックを持つ (待機中は手動の --once が実行できるように手放す)
+        let guard = if mode == Mode::Daemon {
+            match lock::try_acquire(&lock_path)? {
+                Ok(l) => Some(l),
+                Err(_) => {
+                    std::thread::sleep(LOCK_RETRY);
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         let mut state = State::load(&state_path)?;
         if Instant::now() >= next_cycle {
             let failed = cycle(&cfg, &gh, &mut state, &work_dir, mode == Mode::Check, mode == Mode::Daemon);
@@ -100,6 +134,7 @@ fn real_main() -> Result<()> {
             // 更新の確認とは別に、保留中の「起動」だけをやり直す
             retry_pending(&cfg, &mut state, &mut attempts);
         }
+        drop(guard);
         let until_cycle = next_cycle.saturating_duration_since(Instant::now());
         let wait = if state.has_pending() { until_cycle.min(PENDING_RETRY) } else { until_cycle };
         std::thread::sleep(wait.max(Duration::from_secs(1)));
