@@ -5,7 +5,7 @@ GitHub Releases に上がった実行ファイル(や `.app` を入れた `.dmg`
 ## コマンド
 
 ```
-gh-updater --config <設定.toml> [--once | --check]
+gh-updater [--config <設定.toml>] [--once | --check]
 ```
 
 | 指定 | 動作 |
@@ -15,7 +15,7 @@ gh-updater --config <設定.toml> [--once | --check]
 | `--check` | 更新が必要かを表示するだけ(何も変更しない) |
 | `--version` / `-V`、`-h` / `--help` | 表示して終了 |
 
-`--config` がなければ使い方を出して終了コード 1。不明な引数もエラー。
+`--config` を省略すると `config.toml` を、カレントディレクトリ、なければ実行ファイルのディレクトリから探す(見つかった一方だけを読む)。どちらにもなければエラーで終了コード 1。不明な引数もエラー。
 
 ## 設定(TOML。未知のキーはエラー)
 
