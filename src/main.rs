@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 /// 起動が保留中のターゲットを、この間隔で再試行する (許可ダイアログを出し続けないよう長めに)。
 const PENDING_RETRY: Duration = Duration::from_secs(300);
 
-const USAGE: &str = "使い方: gh-updater --config <設定.toml> [--once | --check]
+const USAGE: &str = "使い方: gh-updater [--config <設定.toml>] [--once | --check]
+  --config    設定ファイル (省略時は config.toml: カレントディレクトリ、なければ実行ファイルのディレクトリ)
   (引数なし)  常駐して interval ごとに確認・更新
   --once      1回だけ確認・更新して終了
   --check     更新が必要かを表示するだけ (何も変更しない)
@@ -42,6 +43,25 @@ fn main() {
     }
 }
 
+/// `--config` なしのときの設定: カレントディレクトリの config.toml。なければ実行ファイルのディレクトリの config.toml
+/// (見つかった一方だけを読む)。どちらにもなければエラー。
+fn default_config_path() -> Result<PathBuf> {
+    let name = "config.toml";
+    let cwd = PathBuf::from(name);
+    if cwd.is_file() {
+        return Ok(cwd);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let exe = exe.canonicalize().unwrap_or(exe);
+        if let Some(beside) = exe.parent().map(|d| d.join(name)) {
+            if beside.is_file() {
+                return Ok(beside);
+            }
+        }
+    }
+    bail!("設定ファイルが見つかりません: --config で指定するか、カレントディレクトリか実行ファイルのディレクトリに {name} を置いてください\n{USAGE}")
+}
+
 fn real_main() -> Result<()> {
     let mut config_path: Option<PathBuf> = None;
     let mut mode = Mode::Daemon;
@@ -62,7 +82,10 @@ fn real_main() -> Result<()> {
             other => bail!("不明な引数: {other}\n{USAGE}"),
         }
     }
-    let config_path = config_path.context(USAGE)?;
+    let config_path = match config_path {
+        Some(p) => p,
+        None => default_config_path()?,
+    };
     let cfg = Config::load(&config_path)?;
 
     let here = config::detect_platform();

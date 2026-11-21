@@ -19,6 +19,8 @@ gh-updater --config updater.toml --once   # 1 回だけ確認・更新
 gh-updater --config updater.toml --check  # 確認のみ(更新しない)
 ```
 
+`--config` を省略すると、`config.toml` をカレントディレクトリから探し、なければ実行ファイルのディレクトリから探します(見つかった一方だけを読みます)。
+
 設定例は `updater.*.toml`(冒頭のコメントに構造の説明あり)。常駐化のひな形は `service/`(systemd / launchd / タスクスケジューラ / NanoKVM)。
 
 ## ビルド

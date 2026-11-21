@@ -19,6 +19,8 @@ gh-updater --config updater.toml --once   # check and update once
 gh-updater --config updater.toml --check  # check only (no update)
 ```
 
+Without `--config`, `config.toml` is searched in the current directory first, then in the directory of the executable (only the one that is found is read).
+
 See `updater.*.toml` for examples (the comment at the top explains the structure). Templates to run it as a service are in `service/` (systemd / launchd / Task Scheduler / NanoKVM).
 
 ## Build
