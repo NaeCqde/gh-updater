@@ -6,6 +6,7 @@ mod self_update;
 mod select;
 mod service;
 mod state;
+mod svc;
 
 use anyhow::{bail, Context, Result};
 use config::{Config, Target};
@@ -24,6 +25,9 @@ const USAGE: &str = "使い方: gh-updater --config <設定.toml> [--once | --ch
   (引数なし)  常駐して interval ごとに確認・更新
   --once      1回だけ確認・更新して終了
   --check     更新が必要かを表示するだけ (何も変更しない)
+  --install   この実行ファイルと --config の設定で、OS の常駐 (systemd / init.d / launchd / タスクスケジューラ) に登録して起動
+  --uninstall 常駐の登録を解除 (実行ファイル・設定・状態ファイルは残す)
+  --dry-run   --install / --uninstall で、書く内容と実行するコマンドを表示するだけ
   --version   バージョンを表示";
 
 fn log(msg: impl AsRef<str>) {
@@ -48,12 +52,16 @@ fn main() {
 fn real_main() -> Result<()> {
     let mut config_path: Option<PathBuf> = None;
     let mut mode = Mode::Daemon;
+    let (mut install, mut uninstall, mut dry_run) = (false, false, false);
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--config" | "-c" => config_path = Some(args.next().context("--config にファイルを指定してください")?.into()),
             "--once" => mode = Mode::Once,
             "--check" => mode = Mode::Check,
+            "--install" => install = true,
+            "--uninstall" => uninstall = true,
+            "--dry-run" => dry_run = true,
             "--version" | "-V" => {
                 println!("gh-updater {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
@@ -65,12 +73,21 @@ fn real_main() -> Result<()> {
             other => bail!("不明な引数: {other}\n{USAGE}"),
         }
     }
+    if install && uninstall {
+        bail!("--install と --uninstall は同時に指定できません");
+    }
+    if uninstall {
+        return svc::uninstall(dry_run);
+    }
     let config_path = config_path.context(USAGE)?;
     let cfg = Config::load(&config_path)?;
 
     let here = config::detect_platform();
     if cfg.updater.platform != here {
         bail!("この設定は {} 用ですが、実行環境は {here} です。別OS用の設定を読んでいないか確認してください", cfg.updater.platform);
+    }
+    if install {
+        return svc::install(&config_path, dry_run);
     }
     let state_path = cfg.updater.state_file.clone().unwrap_or_else(|| state::default_state_dir().join("state.json"));
     let work_dir = state_path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from(".")).join("work");
